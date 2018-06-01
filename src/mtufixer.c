@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdlib.h>
+#include <errno.h>
 #include <arpa/inet.h>
 
 pcap_dumper_t *dumper;
@@ -139,13 +140,14 @@ static void tcf_csum_ipv4_tcp(struct tcphdr* tcph, struct iphdr *iph, unsigned i
 	tcph->check = tcp_v4_check(len, iph->saddr, iph->daddr, pcsum);
 }
 
+u_char *newpkt=NULL;
 void pkthandler(u_char *args, const struct pcap_pkthdr *header, const u_char *packet){
 
     if (header->caplen <= MTU){
         pcap_dump((u_char *)dumper, header, packet);
     } else {
         struct ethhdr* eth = (struct ethhdr*) packet;
-        u_char newpkt[MTU], *cdata;
+        u_char *cdata;
         struct pcap_pkthdr nheader = *header;
         unsigned ns_ip,ns_eth,ns_dat, doff=0, ip_doff=0, tcp_doff=0;
 
@@ -162,7 +164,7 @@ void pkthandler(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
                 // IP
                 ns_eth = MTU;
                 ns_ip  = ns_eth- sizeof(struct ethhdr);
-                ns_dat = ns_ip -(sizeof(struct tcphdr) + ip->ihl*4ul);
+                ns_dat = ns_ip -(tcp->doff*4 + ip->ihl*4ul);
                 nheader.caplen = ns_eth;
                 nheader.len    = ns_eth;
                 //ip->frag_off=0;
@@ -198,7 +200,7 @@ void pkthandler(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
                     ns_eth = remaindata >= MTU ? MTU : remaindata;
                     ns_ip  = ns_eth- sizeof(struct ethhdr);
-                    ns_dat = ns_ip -(sizeof(struct tcphdr) + ip->ihl*4ul);
+                    ns_dat = ns_ip -(tcp->doff*4 + ip->ihl*4ul);
                     nheader.caplen = ns_eth;
                     nheader.len    = ns_eth;
                     ip->tot_len = htons(ns_ip);
@@ -249,10 +251,17 @@ int main(int argc, char**argv){
 
     // IN
     pcap_t *fhin  = pcap_open_offline(fnin, error_buffer);
+    newpkt = malloc(MTU);
+    if(newpkt==NULL){
+        perror("Error allocating Memory...\n");
+        return errno;
+    }
     pcap_loop       (fhin, -1, pkthandler, NULL);
 
     pcap_dump_close(dumper);
-
+    pcap_close(fhin);
+    pcap_close(fhout);
+    free(newpkt);
 
     return 0;
 }
