@@ -1,0 +1,4 @@
+*.o
+*.pcap
+*.zip
+bin
